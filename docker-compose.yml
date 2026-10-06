@@ -1,0 +1,209 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: yomi-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # Internal-only: services reach it as postgres:5432 on yomi-net. No host
+    # port is bound so it cannot clash with a local PostgreSQL.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - yomi-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: yomi-redis
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - yomi-net
+
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: yomi-kafka
+    environment:
+      KAFKA_BROKER_ID: ${KAFKA_BROKER_ID}
+      KAFKA_CONTROLLER_QUORUM_VOTERS: ${KAFKA_CONTROLLER_QUORUM_VOTERS}
+      KAFKA_ADVERTISED_LISTENERS: ${KAFKA_ADVERTISED_LISTENERS}
+      KAFKA_LISTENERS: ${KAFKA_LISTENERS}
+      KAFKA_INTER_BROKER_LISTENER_NAME: ${KAFKA_INTER_BROKER_LISTENER_NAME}
+      KAFKA_CONTROLLER_LISTENER_NAMES: ${KAFKA_CONTROLLER_LISTENER_NAMES}
+      KAFKA_PROCESS_ROLES: ${KAFKA_PROCESS_ROLES}
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: ${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR}
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: ${KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR}
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: ${KAFKA_TRANSACTION_STATE_LOG_MIN_ISR}
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: ${KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS}
+      KAFKA_NUM_PARTITIONS: ${KAFKA_NUM_PARTITIONS}
+      KAFKA_AUTO_OFFSET_RESET: earliest
+    # Internal-only: services reach it as kafka:9092 on yomi-net.
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 20s
+    networks:
+      - yomi-net
+
+  # --- Go microservices ---
+  auth:
+    build:
+      context: ./backend
+      args:
+        SERVICE: auth
+    container_name: yomi-auth
+    environment:
+      PORT: "8081"
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/yomi_auth?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      KAFKA_BROKERS: kafka:9092
+      JWT_PRIVATE_KEY_PATH: ${JWT_PRIVATE_KEY_PATH}
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL}
+      REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL}
+      REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME}
+      REFRESH_COOKIE_DOMAIN: ${REFRESH_COOKIE_DOMAIN}
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - yomi-net
+
+  consent:
+    build:
+      context: ./backend
+      args:
+        SERVICE: consent
+    container_name: yomi-consent
+    environment:
+      PORT: "8082"
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/yomi_consent?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      KAFKA_BROKERS: kafka:9092
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+      CONSENT_TOKEN_SECRET: ${CONSENT_TOKEN_SECRET}
+      CONSENT_TOKEN_TTL: ${CONSENT_TOKEN_TTL}
+      SERVICE_INSTITUTION_URL: http://institution:8084
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - yomi-net
+
+  audit:
+    build:
+      context: ./backend
+      args:
+        SERVICE: audit
+    container_name: yomi-audit
+    environment:
+      PORT: "8083"
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/yomi_audit?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    networks:
+      - yomi-net
+
+  institution:
+    build:
+      context: ./backend
+      args:
+        SERVICE: institution
+    container_name: yomi-institution
+    environment:
+      PORT: "8084"
+      DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/yomi_institution?sslmode=disable
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+      INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - yomi-net
+
+  gateway:
+    build:
+      context: ./backend
+      args:
+        SERVICE: gateway
+    container_name: yomi-gateway
+    environment:
+      PORT: "8080"
+      JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+      SERVICE_AUTH_URL: http://auth:8081
+      SERVICE_CONSENT_URL: http://consent:8082
+      SERVICE_AUDIT_URL: http://audit:8083
+      SERVICE_INSTITUTION_URL: http://institution:8084
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./keys:/keys:ro
+    depends_on:
+      auth:
+        condition: service_started
+      consent:
+        condition: service_started
+      audit:
+        condition: service_started
+      institution:
+        condition: service_started
+    networks:
+      - yomi-net
+
+  # --- Frontend (React production build served by nginx) ---
+  frontend:
+    build: ./frontend
+    container_name: yomi-frontend
+    ports:
+      - "8088:80"
+    depends_on:
+      gateway:
+        condition: service_started
+    networks:
+      - yomi-net
+
+volumes:
+  pgdata:
+
+networks:
+  yomi-net:
+    name: yomi-net
+    driver: bridge

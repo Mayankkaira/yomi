@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS audit.audit_log;
+DROP SCHEMA IF EXISTS audit;

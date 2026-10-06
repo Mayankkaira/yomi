@@ -1,0 +1,194 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --canvas: #F4F4F1;
+    --surface: #FFFFFF;
+    --tint: #F0F0EC;
+    --ink: #14171C;
+    --ink-secondary: #454B54;
+    --ink-muted: #6E747E;
+    --ink-faint: #9CA2AC;
+    --line: #E6E6E1;
+    --line-strong: #D0D0C9;
+  }
+
+  /* Dark theme: flip the surface/text layers, keep accents constant. */
+  .dark {
+    --canvas: #0E1116;
+    --surface: #171B22;
+    --tint: #20252E;
+    --ink: #E7E9ED;
+    --ink-secondary: #B9BEC8;
+    --ink-muted: #8A919D;
+    --ink-faint: #5C6470;
+    --line: #262C36;
+    --line-strong: #333A46;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    color-scheme: light;
+  }
+  .dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans text-[14px] leading-relaxed;
+  }
+
+  /* Visible, consistent focus states everywhere */
+  :focus-visible {
+    outline: 2px solid theme('colors.primary.500');
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: theme('colors.primary.100');
+  }
+}
+
+@layer components {
+  /* Data value: monospace for hashes, IDs, timestamps, sequence numbers */
+  .data-value {
+    @apply font-mono text-[12.5px] tracking-[-0.01em] text-ink-secondary;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Uppercase section label */
+  .label {
+    @apply text-[11px] font-semibold uppercase tracking-label text-ink-muted;
+  }
+
+  /* Hairline panel */
+  .panel {
+    @apply bg-surface border border-line rounded-panel shadow-card;
+  }
+
+  .panel-header {
+    @apply px-5 py-4 border-b border-line flex items-center justify-between gap-4;
+  }
+
+  /* Table primitives */
+  .data-table {
+    @apply w-full text-left border-collapse;
+  }
+
+  .data-table thead th {
+    @apply sticky top-0 z-10 bg-surface px-3 py-2 text-[11px] font-semibold uppercase tracking-label text-ink-muted border-b border-line whitespace-nowrap select-none;
+  }
+
+  .data-table tbody td {
+    @apply px-3 py-2.5 border-b border-line align-middle;
+  }
+
+  /* Numeric/data columns align right for scannability (Stripe dashboard craft) */
+  .data-table td.num,
+  .data-table th.num {
+    @apply text-right;
+  }
+
+  .data-table tbody tr {
+    @apply transition-colors duration-100;
+  }
+
+  .data-table tbody tr:hover {
+    @apply bg-tint;
+  }
+
+  .data-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+
+  /* Skeleton shimmer */
+  .skeleton {
+    @apply bg-tint rounded;
+    position: relative;
+    overflow: hidden;
+  }
+  .skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+    animation: shimmer 1.6s infinite;
+  }
+  @keyframes shimmer {
+    100% {
+      transform: translateX(100%);
+    }
+  }
+
+  /* Page entry: subtle rise + fade so route changes feel intentional */
+  .page-enter {
+    animation: page-in 0.22s ease-out both;
+  }
+  @keyframes page-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Modal + backdrop enter */
+  .modal-backdrop {
+    animation: fade-in 0.18s ease-out both;
+  }
+  .modal-panel {
+    animation: modal-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes modal-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* Toast slide-in */
+  .toast-enter {
+    animation: toast-in 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* Respect users who prefer reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .page-enter,
+    .modal-backdrop,
+    .modal-panel,
+    .toast-enter,
+    .skeleton::after {
+      animation: none;
+    }
+  }
+}

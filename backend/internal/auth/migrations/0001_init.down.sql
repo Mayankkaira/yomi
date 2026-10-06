@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS auth.citizens;
+DROP SCHEMA IF EXISTS auth;
