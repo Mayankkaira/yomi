@@ -1,5 +1,3 @@
-// Package institution implements the Institution service: registration of data
-// consuming organizations and API key management (issue, rotate, revoke).
 package institution
 
 import (
@@ -17,28 +15,29 @@ import (
 	"github.com/yomi/yomi/internal/models"
 )
 
-// Repository owns the institution schema.
 type Repository struct {
 	pool *pgxpool.Pool
 }
 
-// NewRepository wires the postgres pool.
 func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-// Create inserts a new institution and returns it with the plaintext API key
-// (shown once) alongside the stored hash.
-func (r *Repository) Create(ctx context.Context, name, sector string) (models.Institution, string, error) {
+const institutionColumns = `id, name, sector, role, api_key_hash, is_active, created_at`
+
+func (r *Repository) Create(ctx context.Context, name, sector string, role models.InstitutionRole) (models.Institution, string, error) {
+	if !ValidRole(role) {
+		return models.Institution{}, "", ErrInvalidRole
+	}
 	key, err := generateAPIKey()
 	if err != nil {
 		return models.Institution{}, "", err
 	}
 	id := uuid.NewString()
 	_, err = r.pool.Exec(ctx, `
-		INSERT INTO institution.institutions (id, name, sector, api_key_hash)
-		VALUES ($1, $2, $3, $4)`,
-		id, name, sector, hashAPIKey(key))
+		INSERT INTO institution.institutions (id, name, sector, role, api_key_hash)
+		VALUES ($1, $2, $3, $4, $5)`,
+		id, name, sector, string(role), hashAPIKey(key))
 	if err != nil {
 		return models.Institution{}, "", fmt.Errorf("insert institution: %w", err)
 	}
@@ -46,45 +45,47 @@ func (r *Repository) Create(ctx context.Context, name, sector string) (models.In
 		ID:        id,
 		Name:      name,
 		Sector:    sector,
+		Role:      role,
 		IsActive:  true,
 		CreatedAt: time.Now().UTC(),
 	}
 	return inst, key, nil
 }
 
-// ByID fetches an institution by primary key.
 func (r *Repository) ByID(ctx context.Context, id string) (models.Institution, error) {
 	var inst models.Institution
+	var role string
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, name, sector, api_key_hash, is_active, created_at
+		SELECT `+institutionColumns+`
 		FROM institution.institutions WHERE id = $1`, id).
-		Scan(&inst.ID, &inst.Name, &inst.Sector, &inst.APIKeyHash, &inst.IsActive, &inst.CreatedAt)
+		Scan(&inst.ID, &inst.Name, &inst.Sector, &role, &inst.APIKeyHash, &inst.IsActive, &inst.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.Institution{}, ErrNotFound
 	}
 	if err != nil {
 		return models.Institution{}, fmt.Errorf("query institution: %w", err)
 	}
+	inst.Role = models.InstitutionRole(role)
 	return inst, nil
 }
 
-// Authenticate validates an API key and returns the matching institution.
 func (r *Repository) Authenticate(ctx context.Context, apiKey string) (models.Institution, error) {
 	var inst models.Institution
+	var role string
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, name, sector, api_key_hash, is_active, created_at
+		SELECT `+institutionColumns+`
 		FROM institution.institutions WHERE api_key_hash = $1 AND is_active = true`, hashAPIKey(apiKey)).
-		Scan(&inst.ID, &inst.Name, &inst.Sector, &inst.APIKeyHash, &inst.IsActive, &inst.CreatedAt)
+		Scan(&inst.ID, &inst.Name, &inst.Sector, &role, &inst.APIKeyHash, &inst.IsActive, &inst.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return models.Institution{}, ErrInvalidKey
 	}
 	if err != nil {
 		return models.Institution{}, fmt.Errorf("authenticate institution: %w", err)
 	}
+	inst.Role = models.InstitutionRole(role)
 	return inst, nil
 }
 
-// RotateKey replaces an institution's API key and returns the new plaintext.
 func (r *Repository) RotateKey(ctx context.Context, id string) (models.Institution, string, error) {
 	inst, err := r.ByID(ctx, id)
 	if err != nil {
@@ -103,7 +104,20 @@ func (r *Repository) RotateKey(ctx context.Context, id string) (models.Instituti
 	return inst, newKey, nil
 }
 
-// Revoke deactivates an institution so its API key no longer authenticates.
+func (r *Repository) SetRole(ctx context.Context, id string, role models.InstitutionRole) (models.Institution, error) {
+	if !ValidRole(role) {
+		return models.Institution{}, ErrInvalidRole
+	}
+	tag, err := r.pool.Exec(ctx, `UPDATE institution.institutions SET role = $2 WHERE id = $1`, id, string(role))
+	if err != nil {
+		return models.Institution{}, fmt.Errorf("update institution role: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return models.Institution{}, ErrNotFound
+	}
+	return r.ByID(ctx, id)
+}
+
 func (r *Repository) Revoke(ctx context.Context, id string) (models.Institution, error) {
 	inst, err := r.ByID(ctx, id)
 	if err != nil {
@@ -117,7 +131,14 @@ func (r *Repository) Revoke(ctx context.Context, id string) (models.Institution,
 	return inst, nil
 }
 
-// generateAPIKey produces a cryptographically random opaque key.
+func ValidRole(role models.InstitutionRole) bool {
+	switch role {
+	case models.InstitutionRoleViewer, models.InstitutionRoleAnalyst, models.InstitutionRoleAdmin:
+		return true
+	}
+	return false
+}
+
 func generateAPIKey() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -132,9 +153,7 @@ func hashAPIKey(key string) string {
 }
 
 var (
-	// ErrNotFound is returned when an institution does not exist.
-	ErrNotFound = errors.New("institution not found")
-	// ErrInvalidKey is returned when an API key is unknown or the institution
-	// is inactive.
-	ErrInvalidKey = errors.New("invalid institution api key")
+	ErrNotFound    = errors.New("institution not found")
+	ErrInvalidKey  = errors.New("invalid institution api key")
+	ErrInvalidRole = errors.New("invalid institution role")
 )

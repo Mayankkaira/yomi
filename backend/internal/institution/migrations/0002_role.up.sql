@@ -1,0 +1,1 @@
+ALTER TABLE institution.institutions ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'viewer';

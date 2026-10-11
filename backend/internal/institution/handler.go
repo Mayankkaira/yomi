@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/yomi/yomi/internal/models"
 )
 
 // Handler exposes the Institution HTTP API.
@@ -58,21 +59,59 @@ func RequireInternalSecret(secret string) gin.HandlerFunc {
 type RegisterPayload struct {
 	Name   string `json:"name" binding:"required"`
 	Sector string `json:"sector" binding:"required"`
+	Role   string `json:"role"`
 }
 
 // Register creates an institution and returns the one-time plaintext API key.
+// The role defaults to viewer, the lowest trust tier, so a caller must ask
+// explicitly for a wider data ceiling.
 func (h *Handler) Register(c *gin.Context) {
 	var payload RegisterPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid institution payload", "code": "INVALID_INPUT"})
 		return
 	}
-	inst, apiKey, err := h.repo.Create(c.Request.Context(), payload.Name, payload.Sector)
+	role := models.InstitutionRole(payload.Role)
+	if role == "" {
+		role = models.InstitutionRoleViewer
+	}
+	inst, apiKey, err := h.repo.Create(c.Request.Context(), payload.Name, payload.Sector, role)
 	if err != nil {
+		if errors.Is(err, ErrInvalidRole) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown institution role", "code": "INVALID_ROLE"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to register institution", "code": "INTERNAL"})
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"data": inst, "apiKey": apiKey})
+}
+
+// SetRole changes an institution's role, which caps the data scopes it may
+// request. Existing approvals are not widened: the ceiling applies to new
+// requests only.
+func (h *Handler) SetRole(c *gin.Context) {
+	var payload struct {
+		Role string `json:"role" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "role is required", "code": "INVALID_INPUT"})
+		return
+	}
+	inst, err := h.repo.SetRole(c.Request.Context(), c.Param("id"), models.InstitutionRole(payload.Role))
+	if err != nil {
+		if errors.Is(err, ErrInvalidRole) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown institution role", "code": "INVALID_ROLE"})
+			return
+		}
+		if errors.Is(err, ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "institution not found", "code": "NOT_FOUND"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update role", "code": "INTERNAL"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": inst})
 }
 
 // Get returns an institution by ID.

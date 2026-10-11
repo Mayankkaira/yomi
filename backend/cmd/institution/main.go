@@ -60,9 +60,10 @@ func main() {
 		api.POST("/register", handler.Register)
 		// Internal service-to-service authentication (consent service).
 		api.POST("/authenticate", institution.RequireInternalSecret(cfg.InternalServiceSecret), handler.Authenticate)
-		// The rest require an admin JWT in this deployment.
+		// The rest require a JWT in this deployment.
 		api.GET("/:id", middleware.JWTRequired(pub), handler.Get)
 		api.POST("/:id/rotate-key", middleware.JWTRequired(pub), handler.RotateKey)
+		api.PUT("/:id/role", middleware.JWTRequired(pub), middleware.RequireRole("admin"), handler.SetRole)
 	}
 
 	srv := &http.Server{

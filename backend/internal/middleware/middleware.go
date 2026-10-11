@@ -135,7 +135,7 @@ func JWTRequired(pub *rsa.PublicKey) gin.HandlerFunc {
 // the allowed roles. Must be used after JWTRequired.
 func RequireRole(allowed ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, _ := c.Request.Context().Value(CtxRole).(string)
+		role := Role(c.Request.Context())
 		for _, a := range allowed {
 			if role == a {
 				c.Next()
@@ -146,10 +146,22 @@ func RequireRole(allowed ...string) gin.HandlerFunc {
 	}
 }
 
+// RequireAnyRole aborts the request unless the authenticated role is one of
+// the allowed roles. Alias of RequireRole kept for call-site readability.
+func RequireAnyRole(allowed ...string) gin.HandlerFunc {
+	return RequireRole(allowed...)
+}
+
 // SubjectID returns the authenticated subject ID from the request context.
 func SubjectID(ctx context.Context) string {
 	id, _ := ctx.Value(CtxSubjectID).(string)
 	return id
+}
+
+// Role returns the authenticated role from the request context.
+func Role(ctx context.Context) string {
+	role, _ := ctx.Value(CtxRole).(string)
+	return role
 }
 
 // RequestID returns the propagated request ID from the context, generating a
@@ -276,7 +288,7 @@ func CORS(allowedOrigins []string) gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Credentials", "true")
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID, X-Yomi-Internal")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
 			return

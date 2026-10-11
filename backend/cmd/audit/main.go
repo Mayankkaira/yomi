@@ -63,10 +63,18 @@ func main() {
 		Topic:   kafka.TopicConsentEvents,
 	}, func(ctx context.Context, evt models.ConsentEvent) error {
 		entry := audit.FromEvent(evt)
-		if _, err := repo.Append(ctx, entry); err != nil {
+		appended, receipt, err := repo.AppendWithReceipt(ctx, entry, []byte(cfg.ReceiptSecret))
+		if err != nil {
 			return err
 		}
-		slog.Info("audit entry appended", "sequence", "n/a", "event_type", evt.EventType, "event_id", evt.EventID)
+		if receipt != nil {
+			slog.Info("citizen receipt issued",
+				"sequence", appended.SequenceNo,
+				"receipt_id", receipt.ReceiptID,
+				"event_type", evt.EventType)
+			return nil
+		}
+		slog.Info("audit entry appended", "sequence", appended.SequenceNo, "event_type", evt.EventType, "event_id", evt.EventID)
 		return nil
 	})
 	defer consumer.Close()
@@ -76,7 +84,7 @@ func main() {
 		consumerErr <- consumer.Run(ctx)
 	}()
 
-	handler := audit.NewHandler(repo)
+	handler := audit.NewHandler(repo, cfg.ReceiptSecret)
 	pub, err := middleware.LoadPublicKey(cfg.JWTPublicKeyPath)
 	if err != nil {
 		slog.Error("load public key", "error", err)
@@ -86,6 +94,12 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery(), middleware.RequestLogger())
 
+	// Receipt verification is deliberately public: a citizen holds the receipt
+	// and can check it without an account, and a developer can curl it. The
+	// signature proves the ledger issued the entry, and the response only
+	// echoes back what the caller already had.
+	router.POST("/audit/receipt/verify", handler.VerifyReceipt)
+
 	api := router.Group("/audit")
 	api.Use(middleware.JWTRequired(pub))
 	{
@@ -93,6 +107,7 @@ func main() {
 		api.GET("/institution/:institutionId", handler.ByInstitution)
 		api.GET("/event/:eventId", handler.ByID)
 		api.GET("/verify", handler.Verify)
+		api.GET("/receipt/:eventId", handler.RequireReceiptSecret, handler.Receipt)
 	}
 
 	srv := &http.Server{

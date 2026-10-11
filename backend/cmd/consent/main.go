@@ -62,7 +62,7 @@ func main() {
 	defer producer.Close()
 
 	repo := consent.NewRepository(pool)
-	svc := consent.NewService(repo, producer, rdb, cfg.ConsentTokenSecret, cfg.ConsentTokenTTL)
+	svc := consent.NewService(repo, producer, rdb, cfg.ConsentTokenSecret, cfg.ReceiptSecret, cfg.ConsentTokenTTL)
 	instClient := instclient.NewClient(cfg.ServiceInstitutionURL, cfg.InternalServiceSecret)
 	handler := consent.NewHandler(svc, instClient)
 
@@ -78,6 +78,15 @@ func main() {
 	// POST /consent/request is called by institutions with their API key; the
 	// remaining routes are citizen-scoped and require a citizen JWT.
 	router.POST("/consent/request", handler.Request)
+
+	internal := router.Group("/consent")
+	internal.Use(consent.RequireInternalSecret(cfg.InternalServiceSecret))
+	{
+		// Institutions ask the consent service whether an access token they
+		// hold is still valid, so a revocation takes effect immediately.
+		internal.POST("/verify-token", handler.VerifyToken)
+		internal.GET("/scopes", handler.ScopeCatalog)
+	}
 
 	api := router.Group("/consent")
 	api.Use(middleware.JWTRequired(pub), middleware.RequireRole("citizen"))

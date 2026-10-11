@@ -44,6 +44,12 @@ type Config struct {
 	ConsentTokenSecret string
 	ConsentTokenTTL    time.Duration
 
+	// ReceiptSecret signs the tamper-evident receipts handed to citizens. It is
+	// held only by the consent service (which mints a receipt at approval time)
+	// and the audit service (which can rebuild the same receipt from its own
+	// ledger row), so anyone else needs both services to forge one.
+	ReceiptSecret string
+
 	// InternalServiceSecret authorizes service-to-service calls (e.g. consent
 	// → institution authenticate). Must match across services.
 	InternalServiceSecret string
@@ -74,6 +80,7 @@ func Load(service string) *Config {
 		RefreshCookieDomain:   os.Getenv("REFRESH_COOKIE_DOMAIN"),
 		ConsentTokenSecret:    getEnv("CONSENT_TOKEN_SECRET", "dev-only-change-me"),
 		ConsentTokenTTL:       getDurEnv("CONSENT_TOKEN_TTL", 24*time.Hour),
+		ReceiptSecret:         getEnv("RECEIPT_SECRET", ""),
 		InternalServiceSecret: os.Getenv("INTERNAL_SERVICE_SECRET"),
 	}
 

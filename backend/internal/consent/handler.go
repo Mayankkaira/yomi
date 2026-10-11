@@ -9,20 +9,18 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/yomi/yomi/internal/instclient"
 	"github.com/yomi/yomi/internal/middleware"
+	"github.com/yomi/yomi/internal/models"
 )
 
-// Handler exposes the Consent HTTP API.
 type Handler struct {
 	svc  *Service
 	inst *instclient.Client
 }
 
-// NewHandler wires the service and institution client into an HTTP handler.
 func NewHandler(svc *Service, inst *instclient.Client) *Handler {
 	return &Handler{svc: svc, inst: inst}
 }
 
-// RequestPayload is the body for POST /consent/request.
 type RequestPayload struct {
 	InstitutionID string    `json:"institutionId"`
 	CitizenID     string    `json:"citizenId" binding:"required"`
@@ -31,10 +29,6 @@ type RequestPayload struct {
 	ExpiresAt     time.Time `json:"expiresAt" binding:"required"`
 }
 
-// Request creates a new consent request. The institution submits its API key
-// in the X-API-Key header; the institution identity is derived from that key
-// (never trusted from the body), so one institution cannot request on behalf
-// of another.
 func (h *Handler) Request(c *gin.Context) {
 	apiKey := c.GetHeader("X-API-Key")
 	if apiKey == "" {
@@ -66,15 +60,30 @@ func (h *Handler) Request(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "expiry must be in the future", "code": "INVALID_EXPIRY"})
 		return
 	}
-	req, err := h.svc.Request(c.Request.Context(), payload.CitizenID, inst.ID, payload.DataScope, payload.Purpose, payload.ExpiresAt)
+	req, err := h.svc.Request(c.Request.Context(), RequestInput{
+		CitizenID:     payload.CitizenID,
+		InstitutionID: inst.ID,
+		Role:          inst.Role,
+		Scope:         payload.DataScope,
+		Purpose:       payload.Purpose,
+		ExpiresAt:     payload.ExpiresAt,
+	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create consent request", "code": "INTERNAL"})
+		switch {
+		case errors.Is(err, ErrUnknownScope):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unknown data scope requested", "code": "UNKNOWN_SCOPE"})
+		case errors.Is(err, ErrScopeNotAllowed):
+			c.JSON(http.StatusForbidden, gin.H{"error": "institution role cannot request this data scope", "code": "SCOPE_NOT_ALLOWED"})
+		case errors.Is(err, ErrUnknownRole):
+			c.JSON(http.StatusForbidden, gin.H{"error": "institution has no valid role", "code": "UNKNOWN_ROLE"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create consent request", "code": "INTERNAL"})
+		}
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"data": req})
 }
 
-// Pending lists pending requests for a citizen.
 func (h *Handler) Pending(c *gin.Context) {
 	citizenID := middleware.SubjectID(c.Request.Context())
 	if citizenID == "" {
@@ -88,19 +97,17 @@ func (h *Handler) Pending(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": reqs})
 }
 
-// Approve approves a pending request.
 func (h *Handler) Approve(c *gin.Context) {
 	requestID := c.Param("requestId")
 	citizenID := middleware.SubjectID(c.Request.Context())
-	req, err := h.svc.Approve(c.Request.Context(), requestID, citizenID)
+	req, token, err := h.svc.Approve(c.Request.Context(), requestID, citizenID)
 	if err != nil {
 		writeConsentError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": req})
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"request": req, "accessToken": token}})
 }
 
-// Reject rejects a pending request.
 func (h *Handler) Reject(c *gin.Context) {
 	requestID := c.Param("requestId")
 	citizenID := middleware.SubjectID(c.Request.Context())
@@ -112,7 +119,6 @@ func (h *Handler) Reject(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": req})
 }
 
-// Revoke revokes an approved consent.
 func (h *Handler) Revoke(c *gin.Context) {
 	requestID := c.Param("requestId")
 	citizenID := middleware.SubjectID(c.Request.Context())
@@ -124,7 +130,6 @@ func (h *Handler) Revoke(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": req})
 }
 
-// History lists all consent decisions for a citizen.
 func (h *Handler) History(c *gin.Context) {
 	citizenID := middleware.SubjectID(c.Request.Context())
 	reqs, err := h.svc.repo.HistoryByCitizen(c.Request.Context(), citizenID)
@@ -133,6 +138,49 @@ func (h *Handler) History(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": reqs})
+}
+
+func (h *Handler) ScopeCatalog(c *gin.Context) {
+	role := models.InstitutionRole(c.Query("role"))
+	if role == "" {
+		role = models.InstitutionRoleViewer
+	}
+	if !ValidRole(role) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unknown institution role", "code": "UNKNOWN_ROLE"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"role": role, "scopes": CatalogForRole(role)}})
+}
+
+type VerifyTokenPayload struct {
+	AccessToken string `json:"accessToken" binding:"required"`
+}
+
+func (h *Handler) VerifyToken(c *gin.Context) {
+	var payload VerifyTokenPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "accessToken is required", "code": "INVALID_INPUT"})
+		return
+	}
+	auth, err := h.svc.VerifyAccessToken(c.Request.Context(), payload.AccessToken)
+	if err != nil {
+		reason := "INVALID"
+		switch {
+		case errors.Is(err, ErrTokenExpired):
+			reason = "EXPIRED"
+		case errors.Is(err, ErrTokenRevoked):
+			reason = "REVOKED"
+		}
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"active": false, "reason": reason}})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"active":        true,
+		"requestId":     auth.RequestID,
+		"institutionId": auth.InstitutionID,
+		"scope":         auth.Scope,
+		"expiresAt":     auth.ExpiresAt,
+	}})
 }
 
 func writeConsentError(c *gin.Context, err error) {

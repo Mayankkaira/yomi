@@ -1,5 +1,3 @@
-// Package models holds the shared domain structs used across services and the
-// wire format for Kafka consent events.
 package models
 
 import (
@@ -7,7 +5,6 @@ import (
 	"time"
 )
 
-// Role is the authenticated subject type carried inside a JWT.
 type Role string
 
 const (
@@ -16,7 +13,14 @@ const (
 	RoleAdmin       Role = "admin"
 )
 
-// Citizen is the auth record for a registered citizen.
+type InstitutionRole string
+
+const (
+	InstitutionRoleViewer  InstitutionRole = "viewer"
+	InstitutionRoleAnalyst InstitutionRole = "analyst"
+	InstitutionRoleAdmin   InstitutionRole = "admin"
+)
+
 type Citizen struct {
 	ID           string    `json:"id"`
 	AadhaarID    string    `json:"aadhaarId"`
@@ -27,7 +31,6 @@ type Citizen struct {
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
-// ConsentStatus describes the lifecycle of a consent request.
 type ConsentStatus string
 
 const (
@@ -38,31 +41,30 @@ const (
 	StatusExpired  ConsentStatus = "expired"
 )
 
-// ConsentRequest is a citizen consent decision record.
 type ConsentRequest struct {
-	ID            string    `json:"id"`
-	CitizenID     string    `json:"citizenId"`
-	InstitutionID string    `json:"institutionId"`
-	DataScope     []string  `json:"dataScope"`
-	Purpose       string    `json:"purpose"`
-	Status        string    `json:"status"`
-	AuthToken     string    `json:"authToken,omitempty"`
-	ExpiresAt     time.Time `json:"expiresAt"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID              string          `json:"id"`
+	CitizenID       string          `json:"citizenId"`
+	InstitutionID   string          `json:"institutionId"`
+	InstitutionRole InstitutionRole `json:"institutionRole,omitempty"`
+	DataScope       []string        `json:"dataScope"`
+	Purpose         string          `json:"purpose"`
+	Status          string          `json:"status"`
+	AccessTokenHash string          `json:"accessTokenHash,omitempty"`
+	ExpiresAt       time.Time       `json:"expiresAt"`
+	CreatedAt       time.Time       `json:"createdAt"`
+	UpdatedAt       time.Time       `json:"updatedAt"`
 }
 
-// Institution is a registered data-consuming organization.
 type Institution struct {
-	ID         string    `json:"id"`
-	Name       string    `json:"name"`
-	Sector     string    `json:"sector"`
-	APIKeyHash string    `json:"-"`
-	IsActive   bool      `json:"isActive"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	Sector     string          `json:"sector"`
+	Role       InstitutionRole `json:"role"`
+	APIKeyHash string          `json:"-"`
+	IsActive   bool            `json:"isActive"`
+	CreatedAt  time.Time       `json:"createdAt"`
 }
 
-// AuditEntry is one row in the append-only hash-chained ledger.
 type AuditEntry struct {
 	ID            string          `json:"id"`
 	SequenceNo    int64           `json:"sequenceNo"`
@@ -76,7 +78,6 @@ type AuditEntry struct {
 	CreatedAt     time.Time       `json:"createdAt"`
 }
 
-// ConsentEvent is the Kafka event schema shared by producer and consumer.
 type ConsentEvent struct {
 	EventID       string          `json:"event_id"`
 	EventType     string          `json:"event_type"`
@@ -87,7 +88,6 @@ type ConsentEvent struct {
 	Metadata      json.RawMessage `json:"metadata,omitempty"`
 }
 
-// EventType constants for the consent lifecycle.
 const (
 	EventConsentRequested = "consent_requested"
 	EventConsentApproved  = "consent_approved"

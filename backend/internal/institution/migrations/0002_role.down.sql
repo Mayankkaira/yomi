@@ -1,0 +1,1 @@
+ALTER TABLE institution.institutions DROP COLUMN IF EXISTS role;

@@ -102,6 +102,7 @@ services:
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
       CONSENT_TOKEN_SECRET: ${CONSENT_TOKEN_SECRET}
       CONSENT_TOKEN_TTL: ${CONSENT_TOKEN_TTL}
+      RECEIPT_SECRET: ${RECEIPT_SECRET}
       SERVICE_INSTITUTION_URL: http://institution:8084
       INTERNAL_SERVICE_SECRET: ${INTERNAL_SERVICE_SECRET}
     volumes:
@@ -127,6 +128,7 @@ services:
       DB_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/yomi_audit?sslmode=disable
       KAFKA_BROKERS: kafka:9092
       JWT_PUBLIC_KEY_PATH: ${JWT_PUBLIC_KEY_PATH}
+      RECEIPT_SECRET: ${RECEIPT_SECRET}
     volumes:
       - ./keys:/keys:ro
     depends_on:
