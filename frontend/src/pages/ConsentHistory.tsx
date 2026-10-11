@@ -10,8 +10,10 @@ import { Button } from '../components/common/Button';
 import { useAuth } from '../context/AuthContext';
 import { useConsent } from '../context/ConsentContext';
 import { useInstitutionNames } from '../hooks/useAudit';
+import { consentApi } from '../api/consent';
 import { formatDateTime, cn } from '../utils/format';
-import type { ConsentStatus } from '../types';
+import { scopeLabels } from '../utils/scopes';
+import type { ConsentStatus, ScopeSummary } from '../types';
 
 type SortKey = 'createdAt' | 'status' | 'institutionId';
 type SortDir = 'asc' | 'desc';
@@ -52,11 +54,27 @@ export default function ConsentHistory() {
   const [sortKey, setSortKey] = useState<SortKey>('createdAt');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [page, setPage] = useState(1);
+  const [catalog, setCatalog] = useState<ScopeSummary[]>([]);
 
   useEffect(() => {
     if (!citizen) return;
     void loadHistory(citizen.id);
   }, [citizen, loadHistory]);
+
+  useEffect(() => {
+    let cancelled = false;
+    consentApi
+      .scopeCatalog('admin')
+      .then((data) => {
+        if (!cancelled) setCatalog(data.scopes);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const labels = useMemo(() => scopeLabels(catalog), [catalog]);
 
   const institutions = useInstitutionNames(history.map((h) => h.institutionId));
 
@@ -195,7 +213,7 @@ export default function ConsentHistory() {
                     </p>
                   </td>
                   <td>
-                    <ScopeChips scopes={req.dataScope} />
+                    <ScopeChips scopes={req.dataScope} labels={labels} />
                   </td>
                   <td>
                     <StatusBadge status={req.status} />

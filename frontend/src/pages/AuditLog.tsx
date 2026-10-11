@@ -4,6 +4,7 @@ import { AppShell } from '../components/layout/AppShell';
 import { PageHeader } from '../components/layout/PageHeader';
 import { ChainIntegrityBanner } from '../components/audit/ChainIntegrityBanner';
 import { AuditChainTable } from '../components/audit/AuditChainTable';
+import { VerifyReceiptPanel } from '../components/audit/VerifyReceiptPanel';
 import { EmptyState } from '../components/common/EmptyState';
 import { Spinner } from '../components/common/Spinner';
 import { Button } from '../components/common/Button';
@@ -21,7 +22,6 @@ export default function AuditLog() {
     setPage(1);
   }, [citizen?.id]);
 
-  // Entries arrive newest-first; the chain must read oldest → newest.
   const ascending = useMemo(() => {
     return [...audit.entries].sort((a, b) => a.sequenceNo - b.sequenceNo);
   }, [audit.entries]);
@@ -34,7 +34,6 @@ export default function AuditLog() {
     return map;
   }, [audit.chain]);
 
-  // Resolve institution names for the row display.
   const institutions = useInstitutionNames(audit.entries.map((e) => e.institutionId));
   const institutionNames = useMemo(() => {
     const names: Record<string, string> = {};
@@ -62,6 +61,10 @@ export default function AuditLog() {
 
       <div className="mb-6">
         <ChainIntegrityBanner verification={audit.verification} />
+      </div>
+
+      <div className="mb-6">
+        <VerifyReceiptPanel />
       </div>
 
       {audit.loading && audit.entries.length === 0 ? (

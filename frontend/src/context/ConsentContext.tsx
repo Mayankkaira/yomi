@@ -8,7 +8,7 @@ import {
 } from 'react';
 import { consentApi } from '../api/consent';
 import { errorMessage } from '../api/client';
-import type { ConsentRequest } from '../types';
+import type { ApproveResult, ConsentRequest } from '../types';
 
 interface ConsentState {
   pending: ConsentRequest[];
@@ -60,7 +60,7 @@ interface ConsentContextValue {
   error: string | null;
   loadPending: (citizenId: string) => Promise<void>;
   loadHistory: (citizenId: string) => Promise<void>;
-  approve: (requestId: string) => Promise<void>;
+  approve: (requestId: string) => Promise<ApproveResult>;
   reject: (requestId: string) => Promise<void>;
   revoke: (requestId: string) => Promise<void>;
   clearError: () => void;
@@ -98,8 +98,9 @@ export function ConsentProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const approve = useCallback(async (requestId: string) => {
-    const item = await consentApi.approve(requestId);
-    dispatch({ type: 'ITEM_UPDATED', item });
+    const result = await consentApi.approve(requestId);
+    dispatch({ type: 'ITEM_UPDATED', item: result.request });
+    return result;
   }, []);
 
   const reject = useCallback(async (requestId: string) => {

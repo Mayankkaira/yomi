@@ -1,7 +1,6 @@
-// Domain types for every entity Yomi exchanges with the backend. These mirror
-// the Go structs in backend/internal/models.
-
 export type Role = 'citizen' | 'institution' | 'admin';
+
+export type InstitutionRole = 'viewer' | 'analyst' | 'admin';
 
 export type ConsentStatus = 'pending' | 'approved' | 'rejected' | 'revoked' | 'expired';
 
@@ -25,10 +24,11 @@ export interface ConsentRequest {
   id: string;
   citizenId: string;
   institutionId: string;
+  institutionRole?: InstitutionRole;
   dataScope: string[];
   purpose: string;
   status: ConsentStatus;
-  authToken: string | null;
+  accessTokenHash?: string;
   expiresAt: string;
   createdAt: string;
   updatedAt: string;
@@ -38,6 +38,7 @@ export interface Institution {
   id: string;
   name: string;
   sector: string;
+  role: InstitutionRole;
   isActive: boolean;
   createdAt: string;
 }
@@ -66,6 +67,54 @@ export interface ChainVerification {
   chain: ChainLink[];
 }
 
+export interface Receipt {
+  receiptId: string;
+  version: string;
+  sequenceNo: number;
+  eventType: ConsentEventType;
+  citizenId?: string;
+  institutionId?: string;
+  requestId?: string;
+  metadata?: Record<string, unknown>;
+  recordedAt: string;
+  prevHash: string;
+  entryHash: string;
+  content: string;
+  signature: string;
+}
+
+export interface ReceiptVerification {
+  valid: boolean;
+  reason?: 'NOT_ISSUED' | 'SIGNATURE_MISMATCH';
+  receipt?: Receipt;
+  chainAnchored?: boolean;
+}
+
+export interface AccessTokenCheck {
+  active: boolean;
+  reason?: 'INVALID' | 'EXPIRED' | 'REVOKED';
+  requestId?: string;
+  institutionId?: string;
+  scope?: string[];
+  expiresAt?: string;
+}
+
+export interface ScopeSummary {
+  key: string;
+  label: string;
+  detail: string;
+}
+
+export interface ScopeCatalog {
+  role: InstitutionRole;
+  scopes: ScopeSummary[];
+}
+
+export interface ApproveResult {
+  request: ConsentRequest;
+  accessToken: string;
+}
+
 export interface AuthResponse {
   accessToken: string;
   citizen: Citizen;
@@ -79,8 +128,6 @@ export interface ApiError {
   error: string;
   code: string;
 }
-
-// --- Frontend-only view models ----------------------------------------------
 
 export interface ConsentRequestView extends ConsentRequest {
   institution?: Institution;

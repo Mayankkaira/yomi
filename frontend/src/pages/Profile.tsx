@@ -15,11 +15,15 @@ import { ScopeChips } from '../components/consent/ScopeChips';
 import { EmptyState } from '../components/common/EmptyState';
 import { Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
+import { AccessTokenCheckPanel } from '../components/consent/AccessTokenCheckPanel';
 import { useAuth } from '../context/AuthContext';
 import { useConsent } from '../context/ConsentContext';
 import { useToast } from '../context/ToastContext';
 import { useInstitutionNames } from '../hooks/useAudit';
-import { formatDate, formatDateTime, maskAadhaar, truncateHash, cn } from '../utils/format';
+import { consentApi } from '../api/consent';
+import { formatDate, formatDateTime, maskAadhaar, cn } from '../utils/format';
+import { scopeLabels } from '../utils/scopes';
+import type { ScopeSummary } from '../types';
 
 export default function Profile() {
   const { citizen } = useAuth();
@@ -28,11 +32,27 @@ export default function Profile() {
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<ScopeSummary[]>([]);
 
   useEffect(() => {
     if (!citizen) return;
     void loadHistory(citizen.id);
   }, [citizen, loadHistory]);
+
+  useEffect(() => {
+    let cancelled = false;
+    consentApi
+      .scopeCatalog('admin')
+      .then((data) => {
+        if (!cancelled) setCatalog(data.scopes);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const labels = useMemo(() => scopeLabels(catalog), [catalog]);
 
   const institutions = useInstitutionNames(history.map((h) => h.institutionId));
 
@@ -72,7 +92,6 @@ export default function Profile() {
       <PageHeader title="Profile" description="Your identity, the institutions you have encountered, and active access tokens." />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* Identity */}
         <section className="panel h-fit" aria-label="Citizen identity">
           <div className="px-5 py-5">
             <div className="flex items-center gap-4">
@@ -117,7 +136,6 @@ export default function Profile() {
           </div>
         </section>
 
-        {/* Active consents */}
         <section className="panel lg:col-span-2" aria-label="Active consent tokens">
           <div className="panel-header">
             <div>
@@ -136,7 +154,7 @@ export default function Profile() {
             <EmptyState
               icon={<KeyRound size={20} />}
               title="No active access tokens"
-              description="When you approve a data request, its signed token will appear here and can be revoked at any time."
+              description="When you approve a data request, its authorization appears here and can be revoked at any time."
             />
           ) : (
             <ul className="divide-y divide-line">
@@ -153,19 +171,14 @@ export default function Profile() {
                         {inst && <SectorBadge sector={inst.sector} />}
                       </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                        <ScopeChips scopes={consent.dataScope} />
+                        <ScopeChips scopes={consent.dataScope} labels={labels} />
                         <span className="font-mono text-[11.5px] text-ink-muted">
                           expires {formatDateTime(consent.expiresAt)}
                         </span>
                       </div>
-                      {consent.authToken && (
-                        <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-ink-faint">
-                          <span className="label !text-ink-faint">token</span>
-                          <span className="font-mono" title={consent.authToken}>
-                            {truncateHash(consent.authToken, 14, 10)}
-                          </span>
-                        </p>
-                      )}
+                      <p className="mt-1.5 text-[11.5px] text-ink-faint">
+                        Revoking takes effect immediately — the institution's next check fails.
+                      </p>
                     </div>
                     <Button variant="secondary" size="sm" onClick={() => setConfirmRevoke(consent.id)}>
                       Revoke access
@@ -178,7 +191,10 @@ export default function Profile() {
         </section>
       </div>
 
-      {/* Institutions encountered */}
+      <div className="mt-6">
+        <AccessTokenCheckPanel />
+      </div>
+
       <section className="panel mt-6" aria-label="Institutions encountered">
         <div className="panel-header">
           <div>
@@ -213,7 +229,6 @@ export default function Profile() {
         )}
       </section>
 
-      {/* Revoke confirmation */}
       <Modal
         open={confirmRevoke !== null}
         onClose={() => setConfirmRevoke(null)}
@@ -241,10 +256,10 @@ export default function Profile() {
             <div className="flex items-center gap-2 text-[13.5px] font-medium text-ink">
               <CheckCircle2 size={15} className="text-primary-600" />
               {institutions[selected.institutionId]?.name ?? selected.institutionId.slice(0, 8)}
-              <span className="font-mono text-[11.5px] text-ink-muted">
-                {selected.dataScope.join(', ')}
-              </span>
             </div>
+            <p className="text-[12.5px] text-ink-muted">
+              {selected.dataScope.map((s) => labels[s] ?? s).join(', ')}
+            </p>
             <p className="data-value">approved {formatDateTime(selected.createdAt)}</p>
           </div>
         )}

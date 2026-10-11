@@ -1,23 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Check, X, RotateCcw, Clock3 } from 'lucide-react';
+import { Check, X, RotateCcw, Clock3, Copy, Info } from 'lucide-react';
 import type { ConsentRequest, Institution } from '../../types';
 import { formatDateTime, cn } from '../../utils/format';
 import { Button } from '../common/Button';
 import { SectorBadge } from '../common/Badge';
 import { Modal } from '../common/Modal';
 import { KeyValue, ScopeChips } from './ScopeChips';
+import { useToast } from '../../context/ToastContext';
 
 interface ConsentRequestCardProps {
   request: ConsentRequest;
   institution?: Institution;
-  onApprove: (requestId: string) => Promise<void>;
+  scopeLabels?: Record<string, string>;
+  onApprove: (requestId: string) => Promise<string>;
   onReject: (requestId: string) => Promise<void>;
   busy: boolean;
 }
 
-/** A pending consent request card with full context and decision actions. */
-/** Institution monogram tile: initials on a neutral hairline square, matching
- *  the quiet identity system — color is reserved for status semantics. */
 function InstitutionMark({ name }: { name: string }) {
   const initials = name
     .split(' ')
@@ -33,7 +32,6 @@ function InstitutionMark({ name }: { name: string }) {
   );
 }
 
-/** Live expiry countdown: refreshes every 30s so the urgency stays current. */
 function ExpiryChip({ expiresAt }: { expiresAt: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -65,22 +63,46 @@ function ExpiryChip({ expiresAt }: { expiresAt: string }) {
   );
 }
 
-export function ConsentRequestCard({ request, institution, onApprove, onReject, busy }: ConsentRequestCardProps) {
+export function ConsentRequestCard({
+  request,
+  institution,
+  scopeLabels,
+  onApprove,
+  onReject,
+  busy,
+}: ConsentRequestCardProps) {
+  const { push } = useToast();
   const [confirming, setConfirming] = useState<'approve' | 'reject' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [issuedToken, setIssuedToken] = useState<string | null>(null);
 
   const runAction = async (action: 'approve' | 'reject') => {
     setActionError(null);
     try {
-      if (action === 'approve') await onApprove(request.id);
-      else await onReject(request.id);
+      if (action === 'approve') {
+        const token = await onApprove(request.id);
+        setIssuedToken(token);
+      } else {
+        await onReject(request.id);
+      }
       setConfirming(null);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Action failed');
     }
   };
 
+  const copyToken = async () => {
+    if (!issuedToken) return;
+    try {
+      await navigator.clipboard.writeText(issuedToken);
+      push('info', 'Access token copied. Hand it to the institution over a secure channel.');
+    } catch {
+      push('error', 'Clipboard access denied by the browser.');
+    }
+  };
+
   const institutionName = institution?.name ?? `Institution ${request.institutionId.slice(0, 8)}`;
+  const labels = scopeLabels ?? {};
 
   return (
     <article className="px-5 py-5 transition-colors duration-150 hover:bg-tint">
@@ -91,6 +113,11 @@ export function ConsentRequestCard({ request, institution, onApprove, onReject, 
             <h3 className="text-[15px] font-semibold text-ink">{institutionName}</h3>
             <div className="mt-1 flex flex-wrap items-center gap-2">
               {institution && <SectorBadge sector={institution.sector} />}
+              {request.institutionRole && (
+                <span className="rounded border border-line bg-canvas px-1.5 py-0.5 text-[11px] font-medium text-ink-muted">
+                  {request.institutionRole} tier
+                </span>
+              )}
               <span className="font-mono text-[11px] text-ink-faint">{request.id.slice(0, 8)}</span>
             </div>
           </div>
@@ -108,7 +135,7 @@ export function ConsentRequestCard({ request, institution, onApprove, onReject, 
         </div>
         <div>
           <p className="label mb-1.5">Data requested</p>
-          <ScopeChips scopes={request.dataScope} />
+          <ScopeChips scopes={request.dataScope} labels={labels} />
         </div>
         <div>
           <p className="label mb-1.5">Access window</p>
@@ -118,7 +145,7 @@ export function ConsentRequestCard({ request, institution, onApprove, onReject, 
 
       <div className="mt-4 flex items-center justify-between gap-3">
         <p className="text-[12px] text-ink-muted">
-          Approving grants a signed, revocable access token recorded on the audit ledger.
+          Approving grants a signed, revocable access token and a receipt you can check later.
         </p>
         <div className="flex shrink-0 items-center gap-2">
           <Button variant="secondary" size="sm" icon={<X size={14} />} disabled={busy} onClick={() => setConfirming('reject')}>
@@ -156,20 +183,48 @@ export function ConsentRequestCard({ request, institution, onApprove, onReject, 
           </div>
         }
       >
+        {confirming === 'approve' && (
+          <div className="mb-3 flex items-start gap-2.5 rounded-md border border-line bg-canvas px-3 py-2.5">
+            <Info size={15} className="mt-0.5 shrink-0 text-ink-muted" />
+            <p className="text-[12.5px] leading-relaxed text-ink-muted">
+              In plain words: {institutionName} gets to read the items listed below, only until the date shown, only
+              for the purpose they stated. You can take that access away whenever you want.
+            </p>
+          </div>
+        )}
         <div className="space-y-3">
           <KeyValue label="Purpose" mono={false}>
             {request.purpose}
           </KeyValue>
-          <KeyValue label="Data scope" mono>
-            {request.dataScope.join(', ')}
+          <KeyValue label="Data scope">
+            {request.dataScope.map((s) => labels[s] ?? s).join(', ')}
           </KeyValue>
+        </div>
+      </Modal>
+
+      <Modal
+        open={issuedToken !== null}
+        onClose={() => setIssuedToken(null)}
+        title="Access token issued"
+        description="This token is shown once. Hand it to the institution over a secure channel; the ledger stores only its fingerprint."
+      >
+        <div className="space-y-3">
+          <p className="break-all rounded-md border border-line bg-canvas px-3 py-2.5 font-mono text-[11.5px] leading-relaxed text-ink-secondary">
+            {issuedToken}
+          </p>
+          <Button variant="secondary" size="sm" icon={<Copy size={13} />} onClick={() => void copyToken()}>
+            Copy token
+          </Button>
+          <p className="text-[12px] text-ink-muted">
+            A sealed receipt for this approval is now in your audit ledger — open the entry to check it or save your
+            copy.
+          </p>
         </div>
       </Modal>
     </article>
   );
 }
 
-/** Inline revoke control for active consents (used on profile). */
 export function RevokeButton({ onRevoke, busy }: { onRevoke: () => Promise<void>; busy: boolean }) {
   return (
     <Button variant="secondary" size="sm" icon={<RotateCcw size={13} />} disabled={busy} onClick={onRevoke}>

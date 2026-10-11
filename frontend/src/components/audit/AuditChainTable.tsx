@@ -5,17 +5,14 @@ import { formatDateTime, shortId, truncateHash } from '../../utils/format';
 import { EventLabel } from './EventLabel';
 import { cn } from '../../utils/format';
 import { useToast } from '../../context/ToastContext';
+import { ReceiptPanel } from './ReceiptPanel';
 
 interface AuditChainTableProps {
-  /** Entries ordered oldest → newest so the chain reads top to bottom. */
   entries: AuditEntry[];
-  /** Map of entryId → integrity flag (from chain verification). */
   validity: Record<string, boolean>;
-  /** Optional institution-name resolver for display. */
   institutionNames?: Record<string, string>;
 }
 
-/** Copyable mono value with a small copy affordance. */
 function Copyable({ label, value }: { label: string; value: string }) {
   const { push } = useToast();
   const copy = async () => {
@@ -41,9 +38,6 @@ function Copyable({ label, value }: { label: string; value: string }) {
   );
 }
 
-/** The ledger rendered as a hash chain: each row links to the previous row's
- *  entry hash, with a visual rail connecting consecutive nodes. Clicking a row
- *  reveals the full cryptographic detail for that entry. */
 export function AuditChainTable({ entries, validity, institutionNames }: AuditChainTableProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -155,7 +149,8 @@ function FragmentRow({
       {expanded && (
         <tr className="bg-tint">
           <td colSpan={7} className="px-5 py-4">
-            <div className="rounded-md border border-line bg-surface p-4">
+            <ReceiptPanel entry={entry} institutionName={institutionName ?? undefined} />
+            <div className="mt-4 rounded-md border border-line bg-surface p-4">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-[12.5px] font-semibold uppercase tracking-label text-ink-muted">
                   Entry {entry.sequenceNo} — cryptographic detail

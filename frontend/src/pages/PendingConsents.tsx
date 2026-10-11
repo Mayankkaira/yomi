@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Inbox, RefreshCw } from 'lucide-react';
 import { AppShell } from '../components/layout/AppShell';
 import { PageHeader } from '../components/layout/PageHeader';
@@ -11,17 +11,17 @@ import { useToast } from '../context/ToastContext';
 import { useInstitutionNames } from '../hooks/useAudit';
 import { usePoll } from '../hooks/usePoll';
 import { consentApi } from '../api/consent';
+import { scopeLabels } from '../utils/scopes';
+import type { ScopeSummary } from '../types';
 
-/** Pending consent requests with auto-refresh via polling. */
 export default function PendingConsents() {
   const { citizen } = useAuth();
   const { pending, loadPending, approve, reject } = useConsent();
   const { push } = useToast();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [catalog, setCatalog] = useState<ScopeSummary[]>([]);
 
-  // Poll the pending list every 8 seconds so new institution requests appear
-  // without a manual refresh; each successful poll refreshes context state.
   const poll = usePoll(async () => {
     if (!citizen) return null;
     return consentApi.pending(citizen.id);
@@ -32,25 +32,40 @@ export default function PendingConsents() {
     void loadPending(citizen.id);
   }, [citizen, loadPending]);
 
-  // Keep the context list in sync with poll results.
   useEffect(() => {
     if (poll.data && citizen) {
       void loadPending(citizen.id);
     }
   }, [poll.data, citizen, loadPending]);
 
+  useEffect(() => {
+    let cancelled = false;
+    consentApi
+      .scopeCatalog('admin')
+      .then((data) => {
+        if (!cancelled) setCatalog(data.scopes);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const labels = useMemo(() => scopeLabels(catalog), [catalog]);
   const institutions = useInstitutionNames(pending.map((r) => r.institutionId));
 
   const handleApprove = async (requestId: string) => {
     setBusyId(requestId);
     setError(null);
     try {
-      await approve(requestId);
-      push('success', 'Consent approved — a signed, revocable access token was issued.');
+      const result = await approve(requestId);
+      push('success', 'Approved. A receipt is ready in your audit ledger.');
+      return result.accessToken;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Approval failed';
       setError(message);
       push('error', message);
+      throw err;
     } finally {
       setBusyId(null);
     }
@@ -66,6 +81,7 @@ export default function PendingConsents() {
       const message = err instanceof Error ? err.message : 'Rejection failed';
       setError(message);
       push('error', message);
+      throw err;
     } finally {
       setBusyId(null);
     }
@@ -75,7 +91,7 @@ export default function PendingConsents() {
     <AppShell>
       <PageHeader
         title="Pending requests"
-        description="Institutions are waiting for your explicit decision. Approvals grant a signed, revocable access token."
+        description="Institutions are waiting for your explicit decision. Approving issues a signed access token you can revoke at any time."
         actions={
           <Button
             variant="secondary"
@@ -127,6 +143,7 @@ export default function PendingConsents() {
               key={req.id}
               request={req}
               institution={institutions[req.institutionId]}
+              scopeLabels={labels}
               onApprove={handleApprove}
               onReject={handleReject}
               busy={busyId === req.id}

@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { ApiEnvelope, AuditEntry, ChainVerification } from '../types';
+import type { ApiEnvelope, AuditEntry, ChainVerification, Receipt, ReceiptVerification } from '../types';
 
 export const auditApi = {
   async forCitizen(citizenId: string): Promise<AuditEntry[]> {
@@ -19,6 +19,16 @@ export const auditApi = {
 
   async verify(): Promise<ChainVerification> {
     const res = await api.get<ApiEnvelope<ChainVerification>>('/audit/verify');
+    return res.data.data;
+  },
+
+  async receiptFor(eventId: string): Promise<Receipt> {
+    const res = await api.get<ApiEnvelope<Receipt>>(`/audit/receipt/${eventId}`);
+    return res.data.data;
+  },
+
+  async verifyReceipt(receipt: Receipt): Promise<ReceiptVerification> {
+    const res = await api.post<ApiEnvelope<ReceiptVerification>>('/audit/receipt/verify', receipt);
     return res.data.data;
   },
 };

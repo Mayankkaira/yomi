@@ -1,5 +1,11 @@
 import { api } from './client';
-import type { ApiEnvelope, ConsentRequest } from '../types';
+import type {
+  AccessTokenCheck,
+  ApiEnvelope,
+  ApproveResult,
+  ConsentRequest,
+  ScopeCatalog,
+} from '../types';
 
 export const consentApi = {
   async pending(citizenId: string): Promise<ConsentRequest[]> {
@@ -12,8 +18,8 @@ export const consentApi = {
     return res.data.data;
   },
 
-  async approve(requestId: string): Promise<ConsentRequest> {
-    const res = await api.post<ApiEnvelope<ConsentRequest>>(`/consent/approve/${requestId}`);
+  async approve(requestId: string): Promise<ApproveResult> {
+    const res = await api.post<ApiEnvelope<ApproveResult>>(`/consent/approve/${requestId}`);
     return res.data.data;
   },
 
@@ -24,6 +30,16 @@ export const consentApi = {
 
   async revoke(requestId: string): Promise<ConsentRequest> {
     const res = await api.delete<ApiEnvelope<ConsentRequest>>(`/consent/revoke/${requestId}`);
+    return res.data.data;
+  },
+
+  async scopeCatalog(role: string): Promise<ScopeCatalog> {
+    const res = await api.get<ApiEnvelope<ScopeCatalog>>(`/consent/scopes?role=${encodeURIComponent(role)}`);
+    return res.data.data;
+  },
+
+  async checkAccessToken(accessToken: string): Promise<AccessTokenCheck> {
+    const res = await api.post<ApiEnvelope<AccessTokenCheck>>('/consent/verify-token', { accessToken });
     return res.data.data;
   },
 };
