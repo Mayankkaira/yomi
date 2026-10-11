@@ -191,20 +191,18 @@ func (r *Repository) ByAccessTokenHash(ctx context.Context, hash string) (models
 }
 
 type Service struct {
-	repo          *Repository
-	producer      *kafka.Producer
-	rdb           *redis.Client
-	receiptSecret []byte
-	tokenTTL      time.Duration
+	repo     *Repository
+	producer *kafka.Producer
+	rdb      *redis.Client
+	tokenTTL time.Duration
 }
 
-func NewService(repo *Repository, producer *kafka.Producer, rdb *redis.Client, receiptSecret string, tokenTTL time.Duration) *Service {
+func NewService(repo *Repository, producer *kafka.Producer, rdb *redis.Client, tokenTTL time.Duration) *Service {
 	return &Service{
-		repo:          repo,
-		producer:      producer,
-		rdb:           rdb,
-		receiptSecret: []byte(receiptSecret),
-		tokenTTL:      tokenTTL,
+		repo:     repo,
+		producer: producer,
+		rdb:      rdb,
+		tokenTTL: tokenTTL,
 	}
 }
 
@@ -394,10 +392,6 @@ func (s *Service) VerifyAccessToken(ctx context.Context, token string) (Authoriz
 		Scope:         req.DataScope,
 		ExpiresAt:     req.ExpiresAt,
 	}, nil
-}
-
-func (s *Service) AccessTokenFingerprint(hash string) string {
-	return fingerprint(hash)
 }
 
 func generateAccessToken() (string, error) {

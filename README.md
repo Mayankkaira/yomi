@@ -163,7 +163,7 @@ curl -s $BASE/audit/verify -H "Authorization: Bearer $(cat token.txt)" | jq
 | `REFRESH_COOKIE_NAME`    | auth              | `yomi_refresh`                   | httpOnly refresh cookie name                  |
 | `REFRESH_COOKIE_DOMAIN`  | auth              | —                                | Cookie Domain attribute (optional)            |
 | `CONSENT_TOKEN_TTL`      | consent           | `24h`                            | Lifetime of the Redis revocation marker        |
-| `RECEIPT_SECRET`         | consent, audit    | —                                | HMAC key signing citizen receipts (must match) |
+| `RECEIPT_SECRET`         | audit             | —                                | HMAC key signing citizen receipts              |
 | `INTERNAL_SERVICE_SECRET`| consent, institution | —                             | Shared secret for service-to-service calls    |
 | `SERVICE_AUTH_URL`       | gateway           | `http://localhost:8081`          | Downstream auth base URL                      |
 | `SERVICE_CONSENT_URL`    | gateway           | `http://localhost:8082`          | Downstream consent base URL                   |

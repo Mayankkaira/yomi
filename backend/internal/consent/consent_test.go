@@ -102,12 +102,16 @@ func TestNormalizeScopeRejectsUnknownRole(t *testing.T) {
 }
 
 func TestDescribeScopesLabelsKnownKeys(t *testing.T) {
-	out := DescribeScopes([]string{"identity.basic", "mystery.key"})
-	if out[0].Label != "Name and address" {
-		t.Fatalf("known scope must carry its human label, got %q", out[0].Label)
+	got := CatalogForRole(models.InstitutionRoleAdmin)
+	byKey := make(map[string]string, len(got))
+	for _, s := range got {
+		byKey[s.Key] = s.Label
 	}
-	if out[1].Label != "mystery.key" {
-		t.Fatalf("unknown scope must fall back to its key, got %q", out[1].Label)
+	if byKey["identity.basic"] != "Name and address" {
+		t.Fatalf("known scope must carry its human label, got %q", byKey["identity.basic"])
+	}
+	if _, ok := byKey["mystery.key"]; ok {
+		t.Fatal("the catalog must not contain unrecognised keys")
 	}
 }
 
@@ -117,8 +121,17 @@ func TestCatalogForRoleHidesHigherScopes(t *testing.T) {
 			t.Fatalf("viewer catalog leaked %s", s.Key)
 		}
 	}
-	if len(CatalogForRole(models.InstitutionRoleAdmin)) != len(ScopeCatalog()) {
-		t.Fatal("admin catalog must expose every scope")
+	admin := make(map[string]bool)
+	for _, s := range CatalogForRole(models.InstitutionRoleAdmin) {
+		admin[s.Key] = true
+	}
+	for _, want := range []string{
+		"identity.basic", "identity.contact", "financial.accounts",
+		"financial.transactions", "financial.credit", "health.records", "telecom.usage",
+	} {
+		if !admin[want] {
+			t.Fatalf("admin catalog is missing %s", want)
+		}
 	}
 }
 

@@ -65,12 +65,6 @@ var (
 	ErrUnknownRole     = errors.New("unknown institution role")
 )
 
-func ScopeCatalog() []Scope {
-	out := make([]Scope, len(scopeCatalog))
-	copy(out, scopeCatalog)
-	return out
-}
-
 func scopeByKey(key string) (Scope, bool) {
 	for _, s := range scopeCatalog {
 		if s.Key == key {
@@ -128,18 +122,6 @@ type ScopeSummary struct {
 	Key    string `json:"key"`
 	Label  string `json:"label"`
 	Detail string `json:"detail"`
-}
-
-func DescribeScopes(keys []string) []ScopeSummary {
-	out := make([]ScopeSummary, 0, len(keys))
-	for _, k := range keys {
-		if s, ok := scopeByKey(k); ok {
-			out = append(out, ScopeSummary{Key: s.Key, Label: s.Label, Detail: s.Detail})
-			continue
-		}
-		out = append(out, ScopeSummary{Key: k, Label: k, Detail: "Unrecognised scope key"})
-	}
-	return out
 }
 
 func CatalogForRole(role models.InstitutionRole) []ScopeSummary {

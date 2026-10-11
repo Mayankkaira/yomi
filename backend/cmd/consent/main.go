@@ -58,7 +58,7 @@ func main() {
 	defer producer.Close()
 
 	repo := consent.NewRepository(pool)
-	svc := consent.NewService(repo, producer, rdb, cfg.ReceiptSecret, cfg.ConsentTokenTTL)
+	svc := consent.NewService(repo, producer, rdb, cfg.ConsentTokenTTL)
 	instClient := instclient.NewClient(cfg.ServiceInstitutionURL, cfg.InternalServiceSecret)
 	handler := consent.NewHandler(svc, instClient)
 
