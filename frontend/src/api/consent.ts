@@ -39,7 +39,7 @@ export const consentApi = {
   },
 
   async checkAccessToken(accessToken: string): Promise<AccessTokenCheck> {
-    const res = await api.post<ApiEnvelope<AccessTokenCheck>>('/consent/verify-token', { accessToken });
+    const res = await api.post<ApiEnvelope<AccessTokenCheck>>('/consent/check-token', { accessToken });
     return res.data.data;
   },
 };

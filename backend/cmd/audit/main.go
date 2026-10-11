@@ -1,6 +1,3 @@
-// Command audit runs the Yomi Audit Ledger service. It consumes consent
-// lifecycle events from Kafka and appends them to the hash-chained, append-only
-// audit_log table, and serves the audit query API.
 package main
 
 import (
@@ -47,16 +44,11 @@ func main() {
 
 	repo := audit.NewRepository(pool)
 
-	// Create the topic before the consumer joins so it gets a real partition
-	// assignment even on a cold start where the topic does not exist yet.
 	if err := kafka.EnsureTopic(ctx, cfg.KafkaBrokers, kafka.TopicConsentEvents, 3, 1); err != nil {
 		slog.Error("ensure kafka topic", "error", err)
 		os.Exit(1)
 	}
 
-	// Consume consent events and append them to the ledger. The consumer runs
-	// in its own goroutine so the HTTP API and ledger ingestion share the
-	// process.
 	consumer := kafka.NewConsumer(kafka.ConsumerConfig{
 		GroupID: "audit-ledger",
 		Brokers: cfg.KafkaBrokers,
@@ -94,10 +86,6 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery(), middleware.RequestLogger())
 
-	// Receipt verification is deliberately public: a citizen holds the receipt
-	// and can check it without an account, and a developer can curl it. The
-	// signature proves the ledger issued the entry, and the response only
-	// echoes back what the caller already had.
 	router.POST("/audit/receipt/verify", handler.VerifyReceipt)
 
 	api := router.Group("/audit")

@@ -1,5 +1,3 @@
-// Command institution runs the Yomi Institution service: organization
-// registration and API key management.
 package main
 
 import (
@@ -56,11 +54,11 @@ func main() {
 
 	api := router.Group("/institution")
 	{
-		// Registration is open to new institutions.
+
 		api.POST("/register", handler.Register)
-		// Internal service-to-service authentication (consent service).
+
 		api.POST("/authenticate", institution.RequireInternalSecret(cfg.InternalServiceSecret), handler.Authenticate)
-		// The rest require a JWT in this deployment.
+
 		api.GET("/:id", middleware.JWTRequired(pub), handler.Get)
 		api.POST("/:id/rotate-key", middleware.JWTRequired(pub), handler.RotateKey)
 		api.PUT("/:id/role", middleware.JWTRequired(pub), middleware.RequireRole("admin"), handler.SetRole)

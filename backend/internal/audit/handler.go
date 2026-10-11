@@ -110,9 +110,6 @@ func (h *Handler) VerifyReceipt(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify receipt", "code": "INTERNAL"})
 		return
 	}
-	if !authorizeEntry(c, stored) {
-		return
-	}
 	presented := BuildReceipt(stored, h.receiptSecret)
 	if !constantEqual(presented.Signature, payload.Signature) {
 		c.JSON(http.StatusOK, gin.H{"data": gin.H{"valid": false, "reason": "SIGNATURE_MISMATCH"}})

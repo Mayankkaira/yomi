@@ -2,7 +2,6 @@ package consent
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -168,21 +167,42 @@ func (r *Repository) ApproveWithAccessToken(ctx context.Context, id string, acce
 	return req, nil
 }
 
+func (r *Repository) ByAccessTokenHash(ctx context.Context, hash string) (models.ConsentRequest, error) {
+	if hash == "" {
+		return models.ConsentRequest{}, ErrNotFound
+	}
+	var req models.ConsentRequest
+	var tokenHash *string
+	err := r.pool.QueryRow(ctx, `
+		SELECT `+requestColumns+`
+		FROM consent.consent_requests WHERE access_token_hash = $1`, hash).
+		Scan(&req.ID, &req.CitizenID, &req.InstitutionID, &req.InstitutionRole, &req.DataScope, &req.Purpose, &req.Status,
+			&tokenHash, &req.ExpiresAt, &req.CreatedAt, &req.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return models.ConsentRequest{}, ErrNotFound
+	}
+	if err != nil {
+		return models.ConsentRequest{}, fmt.Errorf("query consent request by token: %w", err)
+	}
+	if tokenHash != nil {
+		req.AccessTokenHash = *tokenHash
+	}
+	return req, nil
+}
+
 type Service struct {
 	repo          *Repository
 	producer      *kafka.Producer
 	rdb           *redis.Client
-	tokenSecret   []byte
 	receiptSecret []byte
 	tokenTTL      time.Duration
 }
 
-func NewService(repo *Repository, producer *kafka.Producer, rdb *redis.Client, tokenSecret, receiptSecret string, tokenTTL time.Duration) *Service {
+func NewService(repo *Repository, producer *kafka.Producer, rdb *redis.Client, receiptSecret string, tokenTTL time.Duration) *Service {
 	return &Service{
 		repo:          repo,
 		producer:      producer,
 		rdb:           rdb,
-		tokenSecret:   []byte(tokenSecret),
 		receiptSecret: []byte(receiptSecret),
 		tokenTTL:      tokenTTL,
 	}
@@ -245,9 +265,6 @@ func (s *Service) Approve(ctx context.Context, requestID, citizenID string) (mod
 	updated, err := s.repo.ApproveWithAccessToken(ctx, requestID, raw)
 	if err != nil {
 		return models.ConsentRequest{}, "", err
-	}
-	if err := s.rdb.Set(ctx, accessTokenKey(updated.AccessTokenHash), updated.InstitutionID, s.tokenTTL).Err(); err != nil {
-		slog.Error("cache access token", "error", err, "request_id", updated.ID)
 	}
 	evt := models.ConsentEvent{
 		EventID:       uuid.NewString(),
@@ -313,7 +330,12 @@ func (s *Service) Revoke(ctx context.Context, requestID, citizenID string) (mode
 	if err != nil {
 		return models.ConsentRequest{}, err
 	}
-	s.rdb.Del(ctx, accessTokenKey(revokedHash))
+
+	if revokedHash != "" {
+		if err := s.rdb.Set(ctx, accessTokenKey(revokedHash), revokedMarker, s.tokenTTL).Err(); err != nil {
+			slog.Error("write revocation marker", "error", err, "request_id", req.ID)
+		}
+	}
 	evt := models.ConsentEvent{
 		EventID:       uuid.NewString(),
 		EventType:     models.EventConsentRevoked,
@@ -341,42 +363,30 @@ func (s *Service) VerifyAccessToken(ctx context.Context, token string) (Authoriz
 	if token == "" {
 		return Authorization{}, ErrInvalidToken
 	}
-	payload, sig, ok := splitToken(token)
-	if !ok {
-		return Authorization{}, ErrInvalidToken
+	hash := hashAccessToken(token)
+	denied, err := s.rdb.Exists(ctx, accessTokenKey(hash)).Result()
+	if err == nil && denied > 0 {
+		return Authorization{}, ErrTokenRevoked
 	}
-	body, err := base64.RawURLEncoding.DecodeString(payload)
+	req, err := s.repo.ByAccessTokenHash(ctx, hash)
 	if err != nil {
-		return Authorization{}, ErrInvalidToken
-	}
-	expected := signPayload(body, s.tokenSecret)
-	if !hmac.Equal([]byte(expected), []byte(sig)) {
-		return Authorization{}, ErrInvalidToken
-	}
-	var claims struct {
-		RequestID string   `json:"request_id"`
-		Scope     []string `json:"scope"`
-		Expiry    string   `json:"expires_at"`
-	}
-	if err := json.Unmarshal(body, &claims); err != nil {
-		return Authorization{}, ErrInvalidToken
-	}
-	expiry, err := time.Parse(time.RFC3339, claims.Expiry)
-	if err != nil {
-		return Authorization{}, ErrInvalidToken
-	}
-	if time.Now().After(expiry) {
-		return Authorization{}, ErrTokenExpired
-	}
-	req, err := s.repo.RequestByID(ctx, claims.RequestID)
-	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Authorization{}, ErrInvalidToken
+		}
 		return Authorization{}, err
 	}
-	if req.Status != string(models.StatusApproved) {
+	switch req.Status {
+	case string(models.StatusApproved):
+	case string(models.StatusRevoked):
+		return Authorization{}, ErrTokenRevoked
+	default:
 		return Authorization{}, ErrTokenRevoked
 	}
-	if req.AccessTokenHash != hashAccessToken(token) {
+	if req.AccessTokenHash != hash {
 		return Authorization{}, ErrTokenRevoked
+	}
+	if time.Now().After(req.ExpiresAt) {
+		return Authorization{}, ErrTokenExpired
 	}
 	return Authorization{
 		RequestID:     req.ID,
@@ -388,43 +398,6 @@ func (s *Service) VerifyAccessToken(ctx context.Context, token string) (Authoriz
 
 func (s *Service) AccessTokenFingerprint(hash string) string {
 	return fingerprint(hash)
-}
-
-func (s *Service) IssueAccessToken(req models.ConsentRequest) (string, error) {
-	payload := struct {
-		RequestID string   `json:"request_id"`
-		CitizenID string   `json:"citizen_id"`
-		Expiry    string   `json:"expires_at"`
-		Scope     []string `json:"scope"`
-	}{
-		RequestID: req.ID,
-		CitizenID: req.CitizenID,
-		Expiry:    req.ExpiresAt.Format(time.RFC3339),
-		Scope:     req.DataScope,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("marshal authorization payload: %w", err)
-	}
-	return base64.RawURLEncoding.EncodeToString(body) + "." + signPayload(body, s.tokenSecret), nil
-}
-
-func signPayload(body []byte, secret []byte) string {
-	mac := hmac.New(sha256.New, secret)
-	mac.Write(body)
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-}
-
-func splitToken(token string) (string, string, bool) {
-	for i := 0; i < len(token); i++ {
-		if token[i] == '.' {
-			if i == 0 || i == len(token)-1 {
-				return "", "", false
-			}
-			return token[:i], token[i+1:], true
-		}
-	}
-	return "", "", false
 }
 
 func generateAccessToken() (string, error) {
@@ -443,6 +416,8 @@ func hashAccessToken(token string) string {
 func accessTokenKey(hash string) string {
 	return "consent-token:" + hash
 }
+
+const revokedMarker = "revoked"
 
 func fingerprint(hash string) string {
 	if len(hash) < 12 {

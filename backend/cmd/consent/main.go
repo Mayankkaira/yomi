@@ -1,5 +1,3 @@
-// Command consent runs the Yomi Consent service. It manages consent request
-// lifecycle and publishes lifecycle events to Kafka for the audit ledger.
 package main
 
 import (
@@ -52,8 +50,6 @@ func main() {
 	}
 	defer rdb.Close()
 
-	// Ensure the topic exists before the producer starts so the audit
-	// consumer can never join a missing topic.
 	if err := kafka.EnsureTopic(ctx, cfg.KafkaBrokers, kafka.TopicConsentEvents, 3, 1); err != nil {
 		slog.Error("ensure kafka topic", "error", err)
 		os.Exit(1)
@@ -62,7 +58,7 @@ func main() {
 	defer producer.Close()
 
 	repo := consent.NewRepository(pool)
-	svc := consent.NewService(repo, producer, rdb, cfg.ConsentTokenSecret, cfg.ReceiptSecret, cfg.ConsentTokenTTL)
+	svc := consent.NewService(repo, producer, rdb, cfg.ReceiptSecret, cfg.ConsentTokenTTL)
 	instClient := instclient.NewClient(cfg.ServiceInstitutionURL, cfg.InternalServiceSecret)
 	handler := consent.NewHandler(svc, instClient)
 
@@ -75,17 +71,15 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Recovery(), middleware.RequestLogger())
 
-	// POST /consent/request is called by institutions with their API key; the
-	// remaining routes are citizen-scoped and require a citizen JWT.
 	router.POST("/consent/request", handler.Request)
+
+	router.GET("/consent/scopes", handler.ScopeCatalog)
 
 	internal := router.Group("/consent")
 	internal.Use(consent.RequireInternalSecret(cfg.InternalServiceSecret))
 	{
-		// Institutions ask the consent service whether an access token they
-		// hold is still valid, so a revocation takes effect immediately.
+
 		internal.POST("/verify-token", handler.VerifyToken)
-		internal.GET("/scopes", handler.ScopeCatalog)
 	}
 
 	api := router.Group("/consent")
@@ -96,6 +90,8 @@ func main() {
 		api.POST("/reject/:requestId", handler.Reject)
 		api.DELETE("/revoke/:requestId", handler.Revoke)
 		api.GET("/history/:citizenId", handler.History)
+
+		api.POST("/check-token", handler.VerifyToken)
 	}
 
 	srv := &http.Server{

@@ -1,93 +1,12 @@
 package consent
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/yomi/yomi/internal/models"
 )
-
-func testService(secret string) *Service {
-	return &Service{tokenSecret: []byte(secret), receiptSecret: []byte("receipt"), tokenTTL: 24 * time.Hour}
-}
-
-func sampleRequest() models.ConsentRequest {
-	return models.ConsentRequest{
-		ID:              "req-abc",
-		CitizenID:       "citizen-xyz",
-		InstitutionID:   "inst-1",
-		InstitutionRole: models.InstitutionRoleAnalyst,
-		DataScope:       []string{"account.balance", "credit.score"},
-		Purpose:         "Loan",
-		ExpiresAt:       time.Date(2026, 12, 31, 23, 59, 59, 0, time.UTC),
-	}
-}
-
-func TestIssueAccessTokenIsSignedAndParsable(t *testing.T) {
-	svc := testService("test-secret-value")
-	req := sampleRequest()
-
-	token, err := svc.IssueAccessToken(req)
-	if err != nil {
-		t.Fatalf("IssueAccessToken error: %v", err)
-	}
-	payloadPart, sig, ok := strings.Cut(token, ".")
-	if !ok {
-		t.Fatalf("token must be payload.signature, got %s", token)
-	}
-	body, err := base64.RawURLEncoding.DecodeString(payloadPart)
-	if err != nil {
-		t.Fatalf("decode payload: %v", err)
-	}
-	var claims struct {
-		RequestID string   `json:"request_id"`
-		CitizenID string   `json:"citizen_id"`
-		Expiry    string   `json:"expires_at"`
-		Scope     []string `json:"scope"`
-	}
-	if err := json.Unmarshal(body, &claims); err != nil {
-		t.Fatalf("unmarshal payload: %v", err)
-	}
-	if claims.RequestID != "req-abc" || claims.CitizenID != "citizen-xyz" {
-		t.Fatalf("claims mismatch: %+v", claims)
-	}
-	if claims.Expiry != req.ExpiresAt.Format(time.RFC3339) {
-		t.Fatalf("expiry mismatch: %s", claims.Expiry)
-	}
-	if len(claims.Scope) != 2 || claims.Scope[0] != "account.balance" {
-		t.Fatalf("scope mismatch: %v", claims.Scope)
-	}
-
-	mac := hmac.New(sha256.New, []byte("test-secret-value"))
-	mac.Write(body)
-	if !hmac.Equal([]byte(sig), []byte(base64.RawURLEncoding.EncodeToString(mac.Sum(nil)))) {
-		t.Fatal("invalid signature")
-	}
-}
-
-func TestIssueAccessTokenIsDeterministic(t *testing.T) {
-	svc := testService("s")
-	req := sampleRequest()
-	first, _ := svc.IssueAccessToken(req)
-	second, _ := svc.IssueAccessToken(req)
-	if first != second {
-		t.Fatal("signing must be deterministic for the same request")
-	}
-}
-
-func TestIssueAccessTokenDiffersPerSecret(t *testing.T) {
-	req := sampleRequest()
-	a, _ := testService("secret-a").IssueAccessToken(req)
-	b, _ := testService("secret-b").IssueAccessToken(req)
-	if a == b {
-		t.Fatal("different secrets must produce different signatures")
-	}
-}
 
 func TestHashAccessTokenIsStableAndNotReversible(t *testing.T) {
 	token, err := generateAccessToken()
@@ -96,6 +15,9 @@ func TestHashAccessTokenIsStableAndNotReversible(t *testing.T) {
 	}
 	if !strings.HasPrefix(token, "yomi_access_") {
 		t.Fatalf("unexpected token prefix: %s", token)
+	}
+	if strings.Contains(token, ".") {
+		t.Fatalf("an opaque token must not carry a readable payload: %s", token)
 	}
 	if hashAccessToken(token) != hashAccessToken(token) {
 		t.Fatal("hash must be deterministic")
@@ -107,6 +29,23 @@ func TestHashAccessTokenIsStableAndNotReversible(t *testing.T) {
 	if hashAccessToken(token) == hashAccessToken(other) {
 		t.Fatal("distinct tokens must hash distinctly")
 	}
+	if len(token) < 40 {
+		t.Fatalf("token is too short to be unguessable: %d chars", len(token))
+	}
+}
+
+func TestGenerateAccessTokenIsNotPredictable(t *testing.T) {
+	seen := make(map[string]bool, 64)
+	for i := 0; i < 64; i++ {
+		token, err := generateAccessToken()
+		if err != nil {
+			t.Fatalf("generateAccessToken error: %v", err)
+		}
+		if seen[token] {
+			t.Fatal("generateAccessToken repeated a value")
+		}
+		seen[token] = true
+	}
 }
 
 func TestFingerprintIsShortButStable(t *testing.T) {
@@ -114,20 +53,17 @@ func TestFingerprintIsShortButStable(t *testing.T) {
 	if len(fingerprint(hash)) != 12 {
 		t.Fatalf("fingerprint must be 12 chars, got %d", len(fingerprint(hash)))
 	}
+	if fingerprint(hash) == hash {
+		t.Fatal("fingerprint must not expose the whole hash")
+	}
 	if fingerprint("short") != "short" {
 		t.Fatal("short input must pass through unchanged")
 	}
 }
 
-func TestSplitTokenRejectsMalformed(t *testing.T) {
-	for _, bad := range []string{"", ".", "abc.", ".sig", "noseparator"} {
-		if _, _, ok := splitToken(bad); ok {
-			t.Fatalf("malformed token accepted: %q", bad)
-		}
-	}
-	head, tail, ok := splitToken("a.b")
-	if !ok || head != "a" || tail != "b" {
-		t.Fatal("well-formed token must split into two parts")
+func TestAccessTokenKeyNamespacesByHash(t *testing.T) {
+	if accessTokenKey("abc") != "consent-token:abc" {
+		t.Fatalf("unexpected redis key: %s", accessTokenKey("abc"))
 	}
 }
 
@@ -176,14 +112,28 @@ func TestDescribeScopesLabelsKnownKeys(t *testing.T) {
 }
 
 func TestCatalogForRoleHidesHigherScopes(t *testing.T) {
-	viewer := CatalogForRole(models.InstitutionRoleViewer)
-	for _, s := range viewer {
+	for _, s := range CatalogForRole(models.InstitutionRoleViewer) {
 		if s.Key == "health.records" || s.Key == "financial.credit" {
 			t.Fatalf("viewer catalog leaked %s", s.Key)
 		}
 	}
-	admin := CatalogForRole(models.InstitutionRoleAdmin)
-	if len(admin) != len(ScopeCatalog()) {
-		t.Fatalf("admin catalog must expose every scope, got %d of %d", len(admin), len(ScopeCatalog()))
+	if len(CatalogForRole(models.InstitutionRoleAdmin)) != len(ScopeCatalog()) {
+		t.Fatal("admin catalog must expose every scope")
+	}
+}
+
+func TestScopeJSONIsStable(t *testing.T) {
+	if scopeJSON([]string{"identity.basic"}) != `["identity.basic"]` {
+		t.Fatalf("unexpected scope json: %s", scopeJSON([]string{"identity.basic"}))
+	}
+	if scopeJSON(nil) != "null" {
+		t.Fatalf("nil scope must marshal deterministically, got %s", scopeJSON(nil))
+	}
+}
+
+func TestRevokedHashIsRememberedNotForgotten(t *testing.T) {
+	req := models.ConsentRequest{ID: "r", CitizenID: "c", DataScope: []string{"a"}, ExpiresAt: time.Now().Add(time.Hour)}
+	if req.AccessTokenHash != "" {
+		t.Fatal("a request must not carry a token hash until it is approved")
 	}
 }

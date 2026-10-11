@@ -14,6 +14,7 @@ export function VerifyReceiptPanel() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ReceiptVerification | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [alteredFields, setAlteredFields] = useState<string[]>([]);
 
   const check = async () => {
     const text = raw.trim();
@@ -35,6 +36,14 @@ export function VerifyReceiptPanel() {
       const verified = await auditApi.verifyReceipt(parsed);
       setReceipt(parsed);
       setResult(verified);
+      if (verified.valid && verified.receipt) {
+        const drifted = (Object.keys(verified.receipt) as Array<keyof Receipt>).filter(
+          (k) => JSON.stringify(verified.receipt?.[k]) !== JSON.stringify(parsed[k]),
+        );
+        setAlteredFields(drifted);
+      } else {
+        setAlteredFields([]);
+      }
     } catch (err) {
       push('error', errorMessage(err).message);
     } finally {
@@ -46,6 +55,7 @@ export function VerifyReceiptPanel() {
     setRaw('');
     setResult(null);
     setReceipt(null);
+    setAlteredFields([]);
   };
 
   return (
@@ -108,6 +118,12 @@ export function VerifyReceiptPanel() {
                       ? ' The entry still sits at that position in the chain.'
                       : ' The entry has moved — treat this as a red flag.'}
                   </p>
+                  {alteredFields.length > 0 && (
+                    <p className="mt-2 rounded border border-amber-200 bg-amber-50 px-2.5 py-2 text-[12.5px] text-amber-800">
+                      Careful — the copy you pasted differs from the ledger in: {alteredFields.join(', ')}. The
+                      authoritative values are the ones shown below, taken from the ledger, not from your file.
+                    </p>
+                  )}
                 </>
               ) : (
                 <>

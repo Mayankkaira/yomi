@@ -5,8 +5,9 @@ import { errorMessage } from '../../api/client';
 import { useToast } from '../../context/ToastContext';
 import { Button } from '../common/Button';
 import { Spinner } from '../common/Spinner';
-import type { AuditEntry, Receipt, ReceiptVerification } from '../../types';
+import { AuditEntry, Receipt, ReceiptVerification } from '../../types';
 import { formatDateTime } from '../../utils/format';
+import { ReceiptInspector } from './ReceiptInspector';
 
 interface ReceiptPanelProps {
   entry: AuditEntry;
@@ -124,6 +125,7 @@ export function ReceiptPanel({ entry, institutionName }: ReceiptPanelProps) {
               Check again
             </Button>
           </div>
+          <ReceiptInspector receipt={receipt} />
         </div>
       )}
 

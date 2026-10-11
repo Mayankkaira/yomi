@@ -1,5 +1,3 @@
-// Package middleware provides shared HTTP middleware: JWT validation, token
-// bucket rate limiting, structured logging with request ID propagation, and CORS.
 package middleware
 
 import (
@@ -29,17 +27,14 @@ const (
 	CtxRole      ctxKey = "role"
 )
 
-// ErrInvalidToken is returned when a JWT fails validation.
 var ErrInvalidToken = errors.New("invalid token")
 
-// Claims is the custom JWT payload for Yomi access tokens.
 type Claims struct {
 	SubjectID string `json:"sub_id"`
 	Role      string `json:"role"`
 	jwt.RegisteredClaims
 }
 
-// LoadPublicKey reads and parses an RSA public key in PKCS#1 PEM form.
 func LoadPublicKey(path string) (*rsa.PublicKey, error) {
 	if path == "" {
 		return nil, errors.New("no public key path configured")
@@ -63,9 +58,6 @@ func LoadPublicKey(path string) (*rsa.PublicKey, error) {
 	return rsaPub, nil
 }
 
-// LoadPrivateKey reads and parses an RSA private key in PEM form. Both PKCS#1
-// and PKCS#8 encodings are accepted (openssl genrsa emits PKCS#8 on newer
-// versions).
 func LoadPrivateKey(path string) (*rsa.PrivateKey, error) {
 	if path == "" {
 		return nil, errors.New("no private key path configured")
@@ -92,7 +84,6 @@ func LoadPrivateKey(path string) (*rsa.PrivateKey, error) {
 	return key, nil
 }
 
-// parseToken validates the signature and claims of a bearer token.
 func parseToken(tokenString string, pub *rsa.PublicKey) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
@@ -110,8 +101,6 @@ func parseToken(tokenString string, pub *rsa.PublicKey) (*Claims, error) {
 	return claims, nil
 }
 
-// JWTRequired validates the Authorization bearer token and injects the
-// subject ID and role into the request context.
 func JWTRequired(pub *rsa.PublicKey) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		auth := c.GetHeader("Authorization")
@@ -131,8 +120,6 @@ func JWTRequired(pub *rsa.PublicKey) gin.HandlerFunc {
 	}
 }
 
-// RequireRole aborts the request unless the authenticated role matches one of
-// the allowed roles. Must be used after JWTRequired.
 func RequireRole(allowed ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role := Role(c.Request.Context())
@@ -146,26 +133,20 @@ func RequireRole(allowed ...string) gin.HandlerFunc {
 	}
 }
 
-// RequireAnyRole aborts the request unless the authenticated role is one of
-// the allowed roles. Alias of RequireRole kept for call-site readability.
 func RequireAnyRole(allowed ...string) gin.HandlerFunc {
 	return RequireRole(allowed...)
 }
 
-// SubjectID returns the authenticated subject ID from the request context.
 func SubjectID(ctx context.Context) string {
 	id, _ := ctx.Value(CtxSubjectID).(string)
 	return id
 }
 
-// Role returns the authenticated role from the request context.
 func Role(ctx context.Context) string {
 	role, _ := ctx.Value(CtxRole).(string)
 	return role
 }
 
-// RequestID returns the propagated request ID from the context, generating a
-// fresh one if absent.
 func RequestID(ctx context.Context) string {
 	if id, ok := ctx.Value(CtxRequestID).(string); ok && id != "" {
 		return id
@@ -173,13 +154,11 @@ func RequestID(ctx context.Context) string {
 	return uuid.NewString()
 }
 
-// tokenBucket is a leaky-token-bucket limiter for a single client key.
 type tokenBucket struct {
 	tokens float64
 	last   time.Time
 }
 
-// RateLimiter enforces a token bucket per client IP.
 type RateLimiter struct {
 	mu      sync.Mutex
 	buckets map[string]*tokenBucket
@@ -187,7 +166,6 @@ type RateLimiter struct {
 	burst   float64
 }
 
-// NewRateLimiter returns a limiter refilling at rps tokens/second up to burst.
 func NewRateLimiter(rps float64, burst int) *RateLimiter {
 	rl := &RateLimiter{
 		buckets: make(map[string]*tokenBucket),
@@ -198,7 +176,6 @@ func NewRateLimiter(rps float64, burst int) *RateLimiter {
 	return rl
 }
 
-// allow consumes one token for the key, returning false when the bucket is empty.
 func (rl *RateLimiter) allow(key string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -218,7 +195,6 @@ func (rl *RateLimiter) allow(key string) bool {
 	return true
 }
 
-// sweep periodically prunes buckets that have idled past their refill window.
 func (rl *RateLimiter) sweep() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
@@ -233,7 +209,6 @@ func (rl *RateLimiter) sweep() {
 	}
 }
 
-// RateLimit returns a middleware that limits requests per client IP.
 func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
@@ -247,8 +222,6 @@ func (rl *RateLimiter) RateLimit() gin.HandlerFunc {
 	}
 }
 
-// RequestLogger emits a structured JSON log line per request with the request
-// ID propagated through the context and response header.
 func RequestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rid := c.GetHeader("X-Request-ID")
@@ -273,8 +246,6 @@ func RequestLogger() gin.HandlerFunc {
 	}
 }
 
-// CORS configures permissive CORS for the gateway. In production this should
-// be scoped to the frontend origin.
 func CORS(allowedOrigins []string) gin.HandlerFunc {
 	originSet := make(map[string]bool, len(allowedOrigins))
 	for _, o := range allowedOrigins {
